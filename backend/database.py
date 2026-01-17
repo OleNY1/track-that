@@ -1,3 +1,4 @@
+# This file is the bridge between FastAPI and the database
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
