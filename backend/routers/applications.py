@@ -2,6 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 import models
 import schemas
@@ -31,6 +32,27 @@ def list_applications(
 
     return query.all()
 
+@router.get("/search", response_model=list[schemas.Application])
+def search_applications(
+    q: str,
+    db: Session = Depends(get_db),
+):
+    term = f"%{q}%"
+
+    return (
+        db.query(models.Application)
+        .filter(
+            or_(
+                models.Application.company.ilike(term),
+                models.Application.role.ilike(term),
+                models.Application.location.ilike(term),
+                models.Application.status.ilike(term),
+                models.Application.notes.ilike(term),
+            )
+        )
+        .all()
+    )
+
 @router.get("/{app_id}", response_model=schemas.Application)
 def get_application(app_id: int, db: Session = Depends(get_db)):
     app_obj = db.query(models.Application).filter(models.Application.id == app_id).first()
@@ -45,6 +67,7 @@ def create_application(payload: schemas.ApplicationCreate, db: Session = Depends
     db.commit()
     db.refresh(new_app)
     return new_app
+
 
 @router.put("/{app_id}", response_model=schemas.Application)
 def update_application(app_id: int, payload: schemas.ApplicationUpdate, db: Session = Depends(get_db)):

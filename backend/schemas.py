@@ -28,3 +28,4 @@ class ApplicationUpdate(BaseModel):
     date_applied: Optional[date] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+
