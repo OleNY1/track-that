@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Edit application{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Edit application</h1>
+
+<div class="form-card">
+    <form id="editForm" enctype="multipart/form-data">
+        <input type="hidden" id="app_id" value="{{ app_id }}">
+        <div class="form-group">
+            <label for="company_name" class="form-label">Company *</label>
+            <input type="text" class="form-control" id="company_name" name="company_name" required placeholder="e.g. Acme Inc.">
+        </div>
+        <div class="form-group">
+            <label for="role" class="form-label">Role / title *</label>
+            <input type="text" class="form-control" id="role" name="role" required placeholder="e.g. Software Engineer Intern">
+        </div>
+        <div class="form-group">
+            <label for="status" class="form-label">Status</label>
+            <select class="form-select" id="status" name="status">
+                {% for s in statuses %}
+                <option value="{{ s }}">{{ s }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="date_applied" class="form-label">Date applied *</label>
+            <input type="date" class="form-control" id="date_applied" name="date_applied" required>
+        </div>
+        <div class="form-group">
+            <label for="job_url" class="form-label">Job posting URL</label>
+            <input type="url" class="form-control" id="job_url" name="job_url" placeholder="https://...">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Resume</label>
+            <div id="currentResume" class="mb-2 d-none">
+                <a href="#" id="resumeDownload" class="resume-link" target="_blank" rel="noopener">Download attached resume</a>
+                <label class="ms-2">
+                    <input type="checkbox" id="removeResume" name="remove_resume" value="1"> Remove
+                </label>
+            </div>
+            <input type="file" class="form-control" id="resume" name="resume" accept=".pdf,.doc,.docx">
+            <span class="form-hint">PDF, DOC or DOCX. Max 10 MB. Leave empty to keep current.</span>
+        </div>
+        <div class="form-group">
+            <label for="notes" class="form-label">Notes</label>
+            <textarea class="form-control" id="notes" name="notes" rows="3" placeholder="Contact, follow-up, etc."></textarea>
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save changes</button>
+            <a href="{{ url_for('list_applications') }}" class="btn btn-outline">Cancel</a>
+            <button type="button" id="btnDelete" class="btn btn-danger">Delete</button>
+        </div>
+    </form>
+</div>
+
+<div id="editError" class="alert alert-danger mt-3 d-none"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    const appId = $('#app_id').val();
+
+    function loadApplication() {
+        $.get('/api/applications/' + appId)
+            .done(function(app) {
+                $('#company_name').val(app.company_name);
+                $('#role').val(app.role);
+                $('#status').val(app.status);
+                $('#date_applied').val(app.date_applied);
+                $('#job_url').val(app.job_url || '');
+                $('#notes').val(app.notes || '');
+                if (app.resume_path) {
+                    $('#currentResume').removeClass('d-none');
+                    $('#resumeDownload').attr('href', '/api/applications/' + appId + '/resume');
+                } else {
+                    $('#currentResume').addClass('d-none');
+                }
+            })
+            .fail(function() {
+                $('#editError').text('Application not found.').removeClass('d-none');
+            });
+    }
+
+    $('#editForm').on('submit', function(e) {
+        e.preventDefault();
+        const company_name = $('#company_name').val().trim();
+        const role = $('#role').val().trim();
+        const date_applied = $('#date_applied').val();
+        if (!company_name || !role || !date_applied) {
+            $('#editError').text('Company, role, and date applied are required.').removeClass('d-none');
+            return;
+        }
+        $('#editError').addClass('d-none');
+        const formData = new FormData();
+        formData.append('company_name', company_name);
+        formData.append('role', role);
+        formData.append('status', $('#status').val());
+        formData.append('date_applied', date_applied);
+        const jobUrl = $('#job_url').val().trim();
+        if (jobUrl) formData.append('job_url', jobUrl);
+        const notes = $('#notes').val().trim();
+        if (notes) formData.append('notes', notes);
+        if ($('#removeResume').is(':checked')) formData.append('remove_resume', '1');
+        const fileInput = document.getElementById('resume');
+        if (fileInput.files && fileInput.files[0]) formData.append('resume', fileInput.files[0]);
+        $.ajax({
+            url: '/api/applications/' + appId,
+            method: 'PUT',
+            data: formData,
+            processData: false,
+            contentType: false
+        })
+            .done(function() {
+                window.location.href = '/applications';
+            })
+            .fail(function(xhr) {
+                const msg = xhr.responseJSON && xhr.responseJSON.error ? xhr.responseJSON.error : 'Failed to save.';
+                $('#editError').text(msg).removeClass('d-none');
+            });
+    });
+
+    $('#btnDelete').on('click', function() {
+        if (!confirm('Delete this application?')) return;
+        $.ajax({ url: '/api/applications/' + appId, method: 'DELETE' })
+            .done(function() {
+                window.location.href = '/applications';
+            })
+            .fail(function() {
+                $('#editError').text('Failed to delete.').removeClass('d-none');
+            });
+    });
+
+    loadApplication();
+})();
+</script>
+{% endblock %}

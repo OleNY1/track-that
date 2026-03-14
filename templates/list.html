@@ -1,0 +1,333 @@
+{% extends "base.html" %}
+{% block title %}Applications{% endblock %}
+
+{% block content %}
+<div class="page-layout">
+    <!-- Add Application Button -->
+    <div class="add-btn-wrap">
+        <button type="button" class="btn-add-open" id="btnAddOpen">+ Add Application</button>
+    </div>
+
+    <!-- Add Application Modal -->
+    <div id="addModal" class="modal-overlay d-none" aria-hidden="true">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Add Application</h2>
+                <button type="button" class="modal-close" id="modalClose" aria-label="Close">&times;</button>
+            </div>
+            <form id="addForm" class="add-form-modal" enctype="multipart/form-data">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="company_name" class="form-label">Company *</label>
+                        <input type="text" class="form-control" id="company_name" name="company_name" required placeholder="e.g. Acme Inc.">
+                    </div>
+                    <div class="form-group">
+                        <label for="role" class="form-label">Role / title *</label>
+                        <input type="text" class="form-control" id="role" name="role" required placeholder="e.g. Software Engineer">
+                    </div>
+                    <div class="form-group">
+                        <label for="status" class="form-label">Status</label>
+                        <select class="form-select" id="status" name="status">
+                            {% for s in statuses %}
+                            <option value="{{ s }}" {% if s == 'Applied' %}selected{% endif %}>{{ s }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="date_applied" class="form-label">Date applied *</label>
+                        <input type="date" class="form-control" id="date_applied" name="date_applied" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="job_url" class="form-label">Job posting URL</label>
+                        <input type="url" class="form-control" id="job_url" name="job_url" placeholder="https://...">
+                    </div>
+                    <div class="form-group">
+                        <label for="resume" class="form-label">Resume (optional)</label>
+                        <input type="file" class="form-control" id="resume" name="resume" accept=".pdf,.doc,.docx">
+                        <span class="form-hint">PDF, DOC or DOCX. Max 10 MB.</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="notes" class="form-label">Notes</label>
+                        <textarea class="form-control" id="notes" name="notes" rows="3" placeholder="Contact, follow-up, etc."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-outline" id="modalCancel">Cancel</button>
+                    <button type="submit" class="btn-add" id="btnAdd">
+                        <span class="btn-add-text">Add Application</span>
+                        <span class="btn-add-loading d-none">Adding…</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Search -->
+    <section class="card search-card">
+        <label for="searchInput" class="visually-hidden">Search applications</label>
+        <input type="search" id="searchInput" class="search-input" placeholder="Search company, role, status, or notes…" autocomplete="off">
+    </section>
+
+    <!-- Applications Table -->
+    <section class="card table-card">
+        <div id="applicationsContainer">
+            <div id="loading" class="table-loading">Loading applications…</div>
+            <div id="empty" class="table-empty d-none">
+                <p class="table-empty-title">No applications yet</p>
+                <p class="table-empty-text">Click the Add Application button above to get started.</p>
+            </div>
+            <div id="tableWrap" class="table-wrap d-none">
+                <table class="app-table">
+                    <thead>
+                        <tr>
+                            <th>Company</th>
+                            <th>Role</th>
+                            <th>Status</th>
+                            <th>Date Applied</th>
+                            <th>Link</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</div>
+
+<div id="addError" class="alert-error d-none"></div>
+<div id="toastContainer" class="toast-container" aria-live="polite"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    const STATUSES = {{ statuses | tojson }};
+    const statusOptions = STATUSES.map(function(s) {
+        return '<option value="' + escapeAttr(s) + '">' + escapeHtml(s) + '</option>';
+    }).join('');
+
+    $('#date_applied').val(new Date().toISOString().slice(0, 10));
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text || '';
+        return div.innerHTML;
+    }
+    function escapeAttr(text) {
+        return escapeHtml(text).replace(/"/g, '&quot;');
+    }
+
+    function buildUrl() {
+        const q = $('#searchInput').val().trim();
+        let url = '/api/applications';
+        if (q) url += '?q=' + encodeURIComponent(q);
+        return url;
+    }
+
+    function showToast(msg, type) {
+        type = type || 'success';
+        var t = $('<div class="toast toast-' + type + '">' + escapeHtml(msg) + '</div>');
+        $('#toastContainer').append(t);
+        requestAnimationFrame(function() { t.addClass('toast-visible'); });
+        setTimeout(function() {
+            t.addClass('toast-leave');
+            setTimeout(function() { t.remove(); }, 300);
+        }, 2500);
+    }
+
+    function updateStatus(appId, newStatus) {
+        var $row = $('tr[data-id="' + appId + '"]');
+        var $saved = $row.find('.status-saved');
+        $.get('/api/applications/' + appId)
+            .done(function(app) {
+                var payload = {
+                    company_name: app.company_name,
+                    role: app.role,
+                    status: newStatus,
+                    date_applied: app.date_applied,
+                    job_url: app.job_url || null,
+                    notes: app.notes || null
+                };
+                $.ajax({
+                    url: '/api/applications/' + appId,
+                    method: 'PUT',
+                    contentType: 'application/json',
+                    data: JSON.stringify(payload)
+                })
+                    .done(function() {
+                        $saved.text('Saved').addClass('status-saved-show');
+                        setTimeout(function() {
+                            $saved.removeClass('status-saved-show');
+                        }, 1200);
+                        showToast('Status updated');
+                    })
+                    .fail(function() {
+                        loadApplications();
+                        showToast('Failed to update', 'error');
+                    });
+            })
+            .fail(function() { loadApplications(); });
+    }
+
+    function loadApplications() {
+        $('#loading').removeClass('d-none');
+        $('#empty').addClass('d-none');
+        $('#tableWrap').addClass('d-none');
+        $.get(buildUrl())
+            .done(function(data) {
+                $('#loading').addClass('d-none');
+                if (!data || data.length === 0) {
+                    $('#empty').removeClass('d-none');
+                    return;
+                }
+                const tbody = $('#tableBody').empty();
+                data.forEach(function(app) {
+                    const statusSelect = '<span class="status-cell"><select class="table-status-select" data-id="' + app.id + '">' +
+                        STATUSES.map(function(s) {
+                            return '<option value="' + escapeAttr(s) + '"' + (s === app.status ? ' selected' : '') + '>' + escapeHtml(s) + '</option>';
+                        }).join('') + '</select><span class="status-saved"></span></span>';
+                    const openBtn = app.job_url
+                        ? '<a href="' + escapeAttr(app.job_url) + '" target="_blank" rel="noopener" class="btn-open">Open</a>'
+                        : '<span class="btn-open disabled">—</span>';
+                    const editLink = '<a href="/applications/' + app.id + '/edit" class="link-edit">Edit</a>';
+                    const row = $('<tr data-id="' + app.id + '"></tr>');
+                    row.html(
+                        '<td><a href="/applications/' + app.id + '/edit" class="cell-company">' + escapeHtml(app.company_name) + '</a></td>' +
+                        '<td>' + escapeHtml(app.role) + '</td>' +
+                        '<td>' + statusSelect + '</td>' +
+                        '<td>' + escapeHtml(app.date_applied) + '</td>' +
+                        '<td>' + openBtn + '</td>' +
+                        '<td><span class="cell-actions">' + editLink + '<button type="button" class="btn-delete" data-id="' + app.id + '" title="Delete">Delete</button></span></td>'
+                    );
+                    tbody.append(row);
+                    row.css({ opacity: 0 });
+                    row.animate({ opacity: 1 }, 250);
+                });
+                $('#tableWrap').removeClass('d-none');
+            })
+            .fail(function() {
+                $('#loading').addClass('d-none');
+                $('#applicationsContainer').append('<div class="alert-error">Failed to load applications.</div>');
+            });
+    }
+
+    $('#addForm').on('submit', function(e) {
+        e.preventDefault();
+        var company_name = $('#company_name').val().trim();
+        var role = $('#role').val().trim();
+        var date_applied = $('#date_applied').val();
+        if (!company_name || !role || !date_applied) {
+            $('#addError').text('Company, role, and date are required.').removeClass('d-none');
+            return;
+        }
+        $('#addError').addClass('d-none');
+        var $btn = $('#btnAdd');
+        $btn.prop('disabled', true);
+        $btn.find('.btn-add-text').addClass('d-none');
+        $btn.find('.btn-add-loading').removeClass('d-none');
+        var formData = new FormData();
+        formData.append('company_name', company_name);
+        formData.append('role', role);
+        formData.append('status', $('#status').val());
+        formData.append('date_applied', date_applied);
+        var jobUrl = $('#job_url').val().trim();
+        if (jobUrl) formData.append('job_url', jobUrl);
+        var notes = $('#notes').val().trim();
+        if (notes) formData.append('notes', notes);
+        var fileInput = document.getElementById('resume');
+        if (fileInput.files && fileInput.files[0]) formData.append('resume', fileInput.files[0]);
+        $.ajax({
+            url: '/api/applications',
+            method: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false
+        })
+            .done(function() {
+                $('#company_name').val('');
+                $('#role').val('');
+                $('#job_url').val('');
+                $('#notes').val('');
+                $('#resume').val('');
+                closeAddModal();
+                showToast('Application added');
+                loadApplications();
+            })
+            .fail(function(xhr) {
+                $('#addError').text(xhr.responseJSON && xhr.responseJSON.error ? xhr.responseJSON.error : 'Failed to add.').removeClass('d-none');
+                showToast('Failed to add', 'error');
+            })
+            .always(function() {
+                $btn.prop('disabled', false);
+                $btn.find('.btn-add-text').removeClass('d-none');
+                $btn.find('.btn-add-loading').addClass('d-none');
+            });
+    });
+
+    $('#tableBody').on('change', '.table-status-select', function() {
+        const id = $(this).data('id');
+        const val = $(this).val();
+        if (id && val) updateStatus(id, val);
+    });
+
+    $('#tableBody').on('click', '.btn-delete', function(e) {
+        e.preventDefault();
+        var id = $(this).data('id');
+        var $row = $(this).closest('tr');
+        if (!id || !confirm('Delete this application?')) return;
+        $row.addClass('row-deleting');
+        $.ajax({ url: '/api/applications/' + id, method: 'DELETE' })
+            .done(function() {
+                $row.animate({ opacity: 0, height: 0 }, 200, function() {
+                    $row.remove();
+                    showToast('Application deleted');
+                    if ($('#tableBody tr').length === 0) {
+                        $('#tableWrap').addClass('d-none');
+                        $('#empty').removeClass('d-none');
+                    }
+                });
+            })
+            .fail(function() {
+                $row.removeClass('row-deleting');
+                loadApplications();
+                showToast('Failed to delete', 'error');
+            });
+    });
+
+    function openAddModal() {
+        $('#addModal').removeClass('d-none').attr('aria-hidden', 'false');
+        $('#date_applied').val(new Date().toISOString().slice(0, 10));
+        $('#company_name').focus();
+    }
+    function closeAddModal() {
+        $('#addModal').addClass('d-none').attr('aria-hidden', 'true');
+        $('#addError').addClass('d-none');
+    }
+
+    $('#btnAddOpen').on('click', openAddModal);
+    $('#modalClose, #modalCancel').on('click', closeAddModal);
+    $('#addModal').on('click', function(e) {
+        if (e.target === this) closeAddModal();
+    });
+    $(document).on('keydown', function(e) {
+        if (e.key === 'Escape' && !$('#addModal').hasClass('d-none')) closeAddModal();
+    });
+
+    var searchTimeout;
+    $('#searchInput').on('input', function() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(loadApplications, 250);
+    });
+
+    $(document).on('keydown', function(e) {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+            e.preventDefault();
+            $('#searchInput').focus().select();
+        }
+    });
+
+    loadApplications();
+})();
+</script>
+{% endblock %}
